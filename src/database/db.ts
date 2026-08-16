@@ -1,14 +1,7 @@
 // src/database/db.ts
-//
-// Capa de acceso a datos. Este archivo es el "puente" entre:
-//   - database/schema.sql   (el plano de las tablas)
-//   - src/models/types.ts   (los tipos que usa el resto de la app)
-//
-// Aquí se ejecuta el schema una sola vez al arrancar, y se exponen
-// funciones simples para leer/escribir datos ya tipados.
 
 import * as SQLite from "expo-sqlite";
-import { TrackedApp, UsageSession } from "../models/types";
+import { TrackedApp, UsageSession, User } from "../models/types";
 
 const db = SQLite.openDatabaseSync("app.db");
 
@@ -52,8 +45,63 @@ CREATE TABLE IF NOT EXISTS usage_sessions (
 );
 `;
 
+// Columnas agregadas despues de la version original de tracked_apps.
+// ALTER TABLE no soporta "IF NOT EXISTS" en SQLite, asi que se envuelve
+// en try/catch: si la columna ya existe, tira error y lo ignoramos.
+function runMigrations() {
+  const migrations = [
+    `ALTER TABLE tracked_apps ADD COLUMN pending_removal_requested_at TEXT`,
+    `ALTER TABLE tracked_apps ADD COLUMN pending_removal_reason TEXT`,
+  ];
+  for (const sql of migrations) {
+    try {
+      db.execSync(sql);
+    } catch (e) {
+      // La columna ya existia, no hace falta hacer nada.
+    }
+  }
+}
+
 export function initDatabase(): void {
   db.execSync(SCHEMA_SQL);
+  runMigrations();
+}
+
+// ------------------------------------------------------------
+// users
+// ------------------------------------------------------------
+
+export function saveUser(user: User): void {
+  db.runSync(
+    `INSERT OR REPLACE INTO users
+     (id, onboarding_completed, time_perception, main_goal, theme, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [
+      user.id,
+      user.onboardingCompleted ? 1 : 0,
+      user.timePerception ?? null,
+      user.mainGoal ?? null,
+      user.theme,
+      user.createdAt,
+      user.updatedAt,
+    ],
+  );
+}
+
+export function getUser(userId: string): User | null {
+  const row = db.getFirstSync<any>("SELECT * FROM users WHERE id = ?", [
+    userId,
+  ]);
+  if (!row) return null;
+  return {
+    id: row.id,
+    onboardingCompleted: !!row.onboarding_completed,
+    timePerception: row.time_perception ?? undefined,
+    mainGoal: row.main_goal ?? undefined,
+    theme: row.theme,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
 }
 
 // ------------------------------------------------------------
@@ -93,7 +141,10 @@ export function getTrackedApps(userId: string): TrackedApp[] {
   return rows.map(rowToTrackedApp);
 }
 
-function rowToTrackedApp(row: any): TrackedApp {
+function rowToTrackedApp(row: any): TrackedApp & {
+  pendingRemovalRequestedAt?: string;
+  pendingRemovalReason?: string;
+} {
   return {
     id: row.id,
     userId: row.user_id,
@@ -108,7 +159,52 @@ function rowToTrackedApp(row: any): TrackedApp {
     isActive: !!row.is_active,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    pendingRemovalRequestedAt: row.pending_removal_requested_at ?? undefined,
+    pendingRemovalReason: row.pending_removal_reason ?? undefined,
   };
+}
+
+// ------------------------------------------------------------
+// Baja de apps: motivo + espera de 24hs
+// ------------------------------------------------------------
+
+export function requestAppRemoval(
+  appId: string,
+  reason: string,
+  requestedAtIso: string,
+): void {
+  db.runSync(
+    `UPDATE tracked_apps SET pending_removal_requested_at = ?, pending_removal_reason = ? WHERE id = ?`,
+    [requestedAtIso, reason, appId],
+  );
+}
+
+export function cancelAppRemoval(appId: string): void {
+  db.runSync(
+    `UPDATE tracked_apps SET pending_removal_requested_at = NULL, pending_removal_reason = NULL WHERE id = ?`,
+    [appId],
+  );
+}
+
+// Revisa todas las bajas pendientes y las confirma (is_active = 0)
+// si ya pasaron las 24hs desde que se pidieron. Llamar al abrir la app/ajustes.
+export function processPendingRemovals(
+  nowIso: string,
+  delayHours: number,
+): void {
+  const rows = db.getAllSync<any>(
+    `SELECT id, pending_removal_requested_at FROM tracked_apps WHERE pending_removal_requested_at IS NOT NULL AND is_active = 1`,
+  );
+  const now = new Date(nowIso).getTime();
+  for (const row of rows) {
+    const requestedAt = new Date(row.pending_removal_requested_at).getTime();
+    const elapsedHours = (now - requestedAt) / (1000 * 60 * 60);
+    if (elapsedHours >= delayHours) {
+      db.runSync(`UPDATE tracked_apps SET is_active = 0 WHERE id = ?`, [
+        row.id,
+      ]);
+    }
+  }
 }
 
 // ------------------------------------------------------------
