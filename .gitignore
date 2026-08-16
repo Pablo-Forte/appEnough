@@ -45,3 +45,7 @@ example
 .env
 *.db
 *.sqlite
+
+modules/*/android/build/
+modules/*/android/.cxx/
+modules/*/ios/build/

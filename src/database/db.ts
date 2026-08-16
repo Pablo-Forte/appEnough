@@ -7,14 +7,11 @@
 // Aquí se ejecuta el schema una sola vez al arrancar, y se exponen
 // funciones simples para leer/escribir datos ya tipados.
 
-import * as SQLite from 'expo-sqlite';
-import { TrackedApp, UsageSession } from '../models/types';
+import * as SQLite from "expo-sqlite";
+import { TrackedApp, UsageSession } from "../models/types";
 
-const db = SQLite.openDatabaseSync('app.db');
+const db = SQLite.openDatabaseSync("app.db");
 
-// Contenido de database/schema.sql pegado aquí como string.
-// (Alternativa más adelante: cargarlo como asset en vez de duplicarlo,
-// pero para empezar esto es lo más simple y explícito.)
 const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
@@ -54,9 +51,6 @@ CREATE TABLE IF NOT EXISTS usage_sessions (
     UNIQUE(app_id, date)
 );
 `;
-// Nota: para las demás tablas (streaks, goals, checkins, focus_sessions,
-// achievements, block_events) las vamos añadiendo aquí a medida que las
-// vayamos usando, para no arrancar con todo de golpe.
 
 export function initDatabase(): void {
   db.execSync(SCHEMA_SQL);
@@ -87,14 +81,14 @@ export function saveTrackedApp(app: TrackedApp): void {
       app.isActive ? 1 : 0,
       app.createdAt,
       app.updatedAt,
-    ]
+    ],
   );
 }
 
 export function getTrackedApps(userId: string): TrackedApp[] {
   const rows = db.getAllSync<any>(
-    'SELECT * FROM tracked_apps WHERE user_id = ? AND is_active = 1',
-    [userId]
+    "SELECT * FROM tracked_apps WHERE user_id = ? AND is_active = 1",
+    [userId],
   );
   return rows.map(rowToTrackedApp);
 }
@@ -126,7 +120,7 @@ export function upsertUsageSession(session: UsageSession): void {
     `INSERT INTO usage_sessions
      (id, app_id, date, minutes_used, opens_count, blocked_attempts, limit_reached, limit_reached_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(app_id, date) DO UPDATE SET
+     ON CONFLICT(id) DO UPDATE SET
        minutes_used = excluded.minutes_used,
        opens_count = excluded.opens_count,
        blocked_attempts = excluded.blocked_attempts,
@@ -141,14 +135,17 @@ export function upsertUsageSession(session: UsageSession): void {
       session.blockedAttempts,
       session.limitReached ? 1 : 0,
       session.limitReachedAt ?? null,
-    ]
+    ],
   );
 }
 
-export function getTodaySession(appId: string, date: string): UsageSession | null {
+export function getTodaySession(
+  appId: string,
+  date: string,
+): UsageSession | null {
   const row = db.getFirstSync<any>(
-    'SELECT * FROM usage_sessions WHERE app_id = ? AND date = ?',
-    [appId, date]
+    "SELECT * FROM usage_sessions WHERE app_id = ? AND date = ?",
+    [appId, date],
   );
   if (!row) return null;
   return {
