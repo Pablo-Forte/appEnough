@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="accessibility_service_description">Detecta cuando abres una app que superó su límite diario, para ayudarte a respetarlo.</string>
+</resources>

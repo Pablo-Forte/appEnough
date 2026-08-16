@@ -1,7 +1,7 @@
 // src/app/index.tsx
 //
-// Ahora usa datos REALES de uso, via el modulo nativo UsageStats.
-// Si el permiso no esta activado, muestra un boton para ir a Ajustes.
+// Ahora usa datos REALES de uso (UsageStats) Y activa el bloqueo real
+// (AppBlocker) para las apps que superaron su limite diario.
 
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -13,6 +13,7 @@ import {
   Text,
   View,
 } from "react-native";
+import AppBlockerModule from "../../modules/app-blocker/src/AppBlockerModule";
 import UsageStatsModule from "../../modules/usage-stats/src/UsageStatsModule";
 import {
   getTrackedApps,
@@ -27,23 +28,30 @@ const TODAY = new Date().toISOString().split("T")[0];
 
 interface AppWithUsage extends TrackedApp {
   minutesUsedToday: number;
+  isBlocked: boolean;
 }
 
 export default function Index() {
   const [apps, setApps] = useState<AppWithUsage[]>([]);
-  const [hasPermission, setHasPermission] = useState<boolean | null>(null);
+  const [hasUsagePermission, setHasUsagePermission] = useState<boolean | null>(
+    null,
+  );
+  const [hasAccessibilityPermission, setHasAccessibilityPermission] = useState<
+    boolean | null
+  >(null);
   const [refreshing, setRefreshing] = useState(false);
 
   const loadData = useCallback(() => {
-    const granted = UsageStatsModule.hasUsageAccessPermission();
-    setHasPermission(granted);
+    const usageGranted = UsageStatsModule.hasUsageAccessPermission();
+    const accessibilityGranted = AppBlockerModule.hasAccessibilityPermission();
+    setHasUsagePermission(usageGranted);
+    setHasAccessibilityPermission(accessibilityGranted);
 
-    if (!granted) {
+    if (!usageGranted) {
       setApps([]);
       return;
     }
 
-    // Trae el uso real de HOY para todas las apps del dispositivo
     const realUsage = UsageStatsModule.getTodayUsageStats();
     const usageByPackage = new Map(
       realUsage.map((u) => [u.packageName, u.minutesUsed]),
@@ -53,8 +61,8 @@ export default function Index() {
 
     const appsWithUsage: AppWithUsage[] = trackedApps.map((app) => {
       const minutesUsedToday = usageByPackage.get(app.appIdentifier) ?? 0;
+      const isBlocked = minutesUsedToday >= app.dailyLimitMinutes;
 
-      // Guarda el dato real en la base de datos local
       upsertUsageSession({
         id: `session-${app.id}-${TODAY}`,
         appId: app.id,
@@ -62,13 +70,21 @@ export default function Index() {
         minutesUsed: minutesUsedToday,
         opensCount: 0,
         blockedAttempts: 0,
-        limitReached: minutesUsedToday >= app.dailyLimitMinutes,
+        limitReached: isBlocked,
       });
 
-      return { ...app, minutesUsedToday };
+      return { ...app, minutesUsedToday, isBlocked };
     });
 
     setApps(appsWithUsage);
+
+    // Le avisa al servicio de accesibilidad cuales apps bloquear AHORA
+    if (accessibilityGranted) {
+      const blockedPackages = appsWithUsage
+        .filter((a) => a.isBlocked)
+        .map((a) => a.appIdentifier);
+      AppBlockerModule.setBlockedPackages(blockedPackages);
+    }
   }, []);
 
   useEffect(() => {
@@ -80,8 +96,6 @@ export default function Index() {
   function setupTrackedApps() {
     const now = new Date().toISOString();
 
-    // IMPORTANTE: estos appIdentifier deben coincidir EXACTO con el
-    // package name real de la app instalada en el dispositivo.
     const instagram: TrackedApp = {
       id: "app-instagram",
       userId: DEMO_USER_ID,
@@ -122,7 +136,7 @@ export default function Index() {
     setRefreshing(false);
   }
 
-  if (hasPermission === false) {
+  if (hasUsagePermission === false) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.permissionBox}>
@@ -147,6 +161,33 @@ export default function Index() {
     );
   }
 
+  if (hasAccessibilityPermission === false) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.permissionBox}>
+          <Text style={styles.permissionTitle}>Falta otro permiso</Text>
+          <Text style={styles.permissionText}>
+            Para poder bloquear las apps cuando llegues a tu límite, activa
+            nuestro servicio de accesibilidad.
+          </Text>
+          <Pressable
+            style={styles.button}
+            onPress={() => AppBlockerModule.openAccessibilitySettings()}
+          >
+            <Text style={styles.buttonText}>
+              Abrir Ajustes de Accesibilidad
+            </Text>
+          </Pressable>
+          <Pressable style={styles.buttonSecondary} onPress={loadData}>
+            <Text style={styles.buttonSecondaryText}>
+              Ya lo activé, revisar de nuevo
+            </Text>
+          </Pressable>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView
@@ -156,18 +197,17 @@ export default function Index() {
       >
         <Text style={styles.title}>Hoy</Text>
         {apps.map((app) => (
-          <View key={app.id} style={styles.card}>
+          <View
+            key={app.id}
+            style={[styles.card, app.isBlocked && styles.cardBlocked]}
+          >
             <Text style={styles.appName}>{app.displayName}</Text>
             <Text style={styles.limit}>
               {Math.round(app.minutesUsedToday)} / {app.dailyLimitMinutes} min
             </Text>
+            {app.isBlocked && <Text style={styles.blockedTag}>Bloqueada</Text>}
           </View>
         ))}
-        {apps.length === 0 && hasPermission && (
-          <Text style={styles.empty}>
-            Sin uso registrado hoy todavía para Instagram/TikTok.
-          </Text>
-        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -192,9 +232,15 @@ const styles = StyleSheet.create({
     padding: 16,
     marginBottom: 12,
   },
+  cardBlocked: { borderWidth: 1, borderColor: "#E74C3C" },
   appName: { fontSize: 18, fontWeight: "600", color: "#FFFFFF" },
   limit: { fontSize: 14, color: "#9A9AA5", marginTop: 4 },
-  empty: { color: "#9A9AA5", fontSize: 14 },
+  blockedTag: {
+    fontSize: 12,
+    color: "#E74C3C",
+    marginTop: 6,
+    fontWeight: "600",
+  },
   permissionBox: { flex: 1, justifyContent: "center" },
   permissionTitle: {
     fontSize: 22,
