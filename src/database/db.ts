@@ -45,9 +45,6 @@ CREATE TABLE IF NOT EXISTS usage_sessions (
 );
 `;
 
-// Columnas agregadas despues de la version original de tracked_apps.
-// ALTER TABLE no soporta "IF NOT EXISTS" en SQLite, asi que se envuelve
-// en try/catch: si la columna ya existe, tira error y lo ignoramos.
 function runMigrations() {
   const migrations = [
     `ALTER TABLE tracked_apps ADD COLUMN pending_removal_requested_at TEXT`,
@@ -57,7 +54,7 @@ function runMigrations() {
     try {
       db.execSync(sql);
     } catch (e) {
-      // La columna ya existia, no hace falta hacer nada.
+      // La columna ya existia.
     }
   }
 }
@@ -186,8 +183,6 @@ export function cancelAppRemoval(appId: string): void {
   );
 }
 
-// Revisa todas las bajas pendientes y las confirma (is_active = 0)
-// si ya pasaron las 24hs desde que se pidieron. Llamar al abrir la app/ajustes.
 export function processPendingRemovals(
   nowIso: string,
   delayHours: number,
@@ -254,4 +249,25 @@ export function getTodaySession(
     limitReached: !!row.limit_reached,
     limitReachedAt: row.limit_reached_at ?? undefined,
   };
+}
+
+// Totales de uso REAL por dia, de los ultimos N dias (incluyendo hoy),
+// sumando todas las apps activas del usuario. Se usa para "antes/ahora"
+// y el percentil "vas mejor que el X% de tus dias" -- todo con datos reales,
+// nunca inventados.
+export function getRecentDailyTotals(
+  userId: string,
+  days: number,
+): { date: string; totalMinutes: number }[] {
+  const rows = db.getAllSync<any>(
+    `SELECT us.date as date, SUM(us.minutes_used) as total
+     FROM usage_sessions us
+     JOIN tracked_apps ta ON ta.id = us.app_id
+     WHERE ta.user_id = ?
+     GROUP BY us.date
+     ORDER BY us.date DESC
+     LIMIT ?`,
+    [userId, days],
+  );
+  return rows.map((r) => ({ date: r.date, totalMinutes: r.total ?? 0 }));
 }

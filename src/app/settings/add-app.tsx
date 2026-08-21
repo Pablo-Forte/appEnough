@@ -3,6 +3,7 @@
 import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useState } from "react";
 import {
+  Platform,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -15,6 +16,17 @@ import { colors, radius, spacing } from "../../constants/colors";
 import { getTrackedApps } from "../../database/db";
 
 const USER_ID = "demo-user";
+
+const cardShadow = Platform.select({
+  ios: {
+    shadowColor: "#000000",
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.25,
+    shadowRadius: 12,
+  },
+  android: { elevation: 4 },
+  default: {},
+});
 
 export default function AddAppScreen() {
   const router = useRouter();
@@ -60,10 +72,13 @@ export default function AddAppScreen() {
         {availableToAdd.map((app) => (
           <Pressable
             key={app.id}
-            style={styles.card}
+            style={[styles.card, cardShadow]}
             onPress={() => handleSelect(app.id)}
           >
-            <Text style={styles.appName}>{app.displayName}</Text>
+            <View style={styles.titleRow}>
+              <Text style={styles.emoji}>{app.emoji}</Text>
+              <Text style={styles.appName}>{app.displayName}</Text>
+            </View>
             <Text style={styles.plus}>+</Text>
           </Pressable>
         ))}
@@ -101,6 +116,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
+  titleRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  emoji: { fontSize: 20 },
   appName: { fontSize: 16, fontWeight: "600", color: colors.textPrimary },
   plus: { fontSize: 20, color: colors.primary, fontWeight: "700" },
 });

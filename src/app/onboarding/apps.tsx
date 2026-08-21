@@ -2,43 +2,11 @@
 
 import { useRouter } from "expo-router";
 import { useState } from "react";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import OnboardingScreen from "../../components/OnboardingScreen";
-import SelectableRow from "../../components/SelectableRow";
-import { SelectedApp, useOnboarding } from "../../onboarding/OnboardingContext";
-
-const AVAILABLE_APPS: SelectedApp[] = [
-  {
-    id: "app-instagram",
-    displayName: "Instagram",
-    appIdentifier: "com.instagram.android",
-  },
-  {
-    id: "app-tiktok",
-    displayName: "TikTok",
-    appIdentifier: "com.zhiliaoapp.musically",
-  },
-  {
-    id: "app-youtube",
-    displayName: "YouTube",
-    appIdentifier: "com.google.android.youtube",
-  },
-  {
-    id: "app-facebook",
-    displayName: "Facebook",
-    appIdentifier: "com.facebook.katana",
-  },
-  { id: "app-x", displayName: "X", appIdentifier: "com.twitter.android" },
-  {
-    id: "app-reddit",
-    displayName: "Reddit",
-    appIdentifier: "com.reddit.frontpage",
-  },
-  {
-    id: "app-snapchat",
-    displayName: "Snapchat",
-    appIdentifier: "com.snapchat.android",
-  },
-];
+import { AVAILABLE_APPS } from "../../constants/apps";
+import { colors, radius, spacing } from "../../constants/colors";
+import { useOnboarding } from "../../onboarding/OnboardingContext";
 
 export default function SelectAppsScreen() {
   const router = useRouter();
@@ -69,14 +37,58 @@ export default function SelectAppsScreen() {
       onNext={handleNext}
       nextDisabled={selectedIds.size === 0}
     >
-      {AVAILABLE_APPS.map((app) => (
-        <SelectableRow
-          key={app.id}
-          label={app.displayName}
-          selected={selectedIds.has(app.id)}
-          onPress={() => toggle(app.id)}
-        />
-      ))}
+      {AVAILABLE_APPS.map((app) => {
+        const selected = selectedIds.has(app.id);
+        return (
+          <Pressable
+            key={app.id}
+            style={[styles.row, selected && styles.rowSelected]}
+            onPress={() => toggle(app.id)}
+          >
+            <View style={styles.left}>
+              <Text style={styles.emoji}>{app.emoji}</Text>
+              <Text style={[styles.label, selected && styles.labelSelected]}>
+                {app.displayName}
+              </Text>
+            </View>
+            <View style={[styles.dot, selected && styles.dotSelected]} />
+          </Pressable>
+        );
+      })}
     </OnboardingScreen>
   );
 }
+
+const styles = StyleSheet.create({
+  row: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    paddingVertical: 14,
+    paddingHorizontal: spacing.md,
+    marginBottom: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  rowSelected: {
+    backgroundColor: colors.surfaceElevated,
+    borderColor: colors.primary,
+  },
+  left: { flexDirection: "row", alignItems: "center", gap: 12 },
+  emoji: { fontSize: 20 },
+  label: { fontSize: 16, color: colors.textPrimary },
+  labelSelected: { fontWeight: "600" },
+  dot: {
+    width: 20,
+    height: 20,
+    borderRadius: radius.pill,
+    borderWidth: 2,
+    borderColor: colors.textTertiary,
+  },
+  dotSelected: {
+    borderColor: colors.primary,
+    backgroundColor: colors.primary,
+  },
+});

@@ -13,9 +13,13 @@ import {
 } from "react-native";
 import AppBlockerModule from "../../modules/app-blocker/src/AppBlockerModule";
 import UsageStatsModule from "../../modules/usage-stats/src/UsageStatsModule";
-import { REMOVAL_DELAY_HOURS } from "../constants/apps";
+import CountUpText from "../components/ui/CountUpText";
+import ProgressBar from "../components/ui/ProgressBar";
+import { REMOVAL_DELAY_HOURS, emojiForApp } from "../constants/apps";
 import { colors, radius, spacing } from "../constants/colors";
+import { typography } from "../constants/typography";
 import {
+  getRecentDailyTotals,
   getTrackedApps,
   getUser,
   initDatabase,
@@ -27,51 +31,26 @@ import { formatDuration } from "../utils/format";
 
 const USER_ID = "demo-user";
 const TODAY = new Date().toISOString().split("T")[0];
-
-const WEEKDAYS = [
-  "domingo",
-  "lunes",
-  "martes",
-  "miércoles",
-  "jueves",
-  "viernes",
-  "sábado",
-];
-const MONTHS = [
-  "enero",
-  "febrero",
-  "marzo",
-  "abril",
-  "mayo",
-  "junio",
-  "julio",
-  "agosto",
-  "septiembre",
-  "octubre",
-  "noviembre",
-  "diciembre",
-];
+const HISTORY_DAYS = 8; // hoy + 7 dias anteriores
 
 interface AppWithUsage extends TrackedApp {
   minutesUsedToday: number;
   isBlocked: boolean;
 }
 
-function formatToday(): string {
-  const now = new Date();
-  return `${WEEKDAYS[now.getDay()]} ${now.getDate()} de ${MONTHS[now.getMonth()]}`;
-}
-
-function progressColor(percent: number): string {
+function stateColor(percent: number): string {
   if (percent >= 100) return colors.danger;
   if (percent >= 80) return colors.warning;
-  return colors.primary;
+  return colors.accent;
 }
 
 export default function Index() {
   const router = useRouter();
   const [ready, setReady] = useState(false);
   const [apps, setApps] = useState<AppWithUsage[]>([]);
+  const [history, setHistory] = useState<
+    { date: string; totalMinutes: number }[]
+  >([]);
   const [hasUsagePermission, setHasUsagePermission] = useState<boolean | null>(
     null,
   );
@@ -118,6 +97,7 @@ export default function Index() {
     });
 
     setApps(appsWithUsage);
+    setHistory(getRecentDailyTotals(USER_ID, HISTORY_DAYS));
 
     if (accessibilityGranted) {
       const blockedPackages = appsWithUsage
@@ -206,24 +186,38 @@ export default function Index() {
     );
   }
 
-  const totalUsed = apps.reduce((sum, a) => sum + a.minutesUsedToday, 0);
+  // --- Calculos con datos 100% reales ---
+  const totalToday = apps.reduce((sum, a) => sum + a.minutesUsedToday, 0);
   const totalLimit = apps.reduce((sum, a) => sum + a.dailyLimitMinutes, 0);
-  const totalPercent =
-    totalLimit > 0 ? Math.min(100, (totalUsed / totalLimit) * 100) : 0;
+  const todayPercent =
+    totalLimit > 0 ? Math.min(100, (totalToday / totalLimit) * 100) : 0;
+
+  // Dias anteriores reales (excluye hoy), para promedio y percentil
+  const previousDays = history.filter((h) => h.date !== TODAY);
+  const hasHistory = previousDays.length >= 2;
+
+  const weeklyAverage = hasHistory
+    ? previousDays.reduce((sum, d) => sum + d.totalMinutes, 0) /
+      previousDays.length
+    : 0;
+
+  const recoveredMinutes = hasHistory
+    ? Math.max(0, weeklyAverage - totalToday)
+    : 0;
+
+  const daysWithMoreUsage = previousDays.filter(
+    (d) => d.totalMinutes > totalToday,
+  ).length;
+  const percentileBetter = hasHistory
+    ? Math.round((daysWithMoreUsage / previousDays.length) * 100)
+    : null;
 
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <View>
-          <Text style={styles.greeting}>Hoy</Text>
-          <Text style={styles.date}>{formatToday()}</Text>
-        </View>
-        <Pressable
-          onPress={() => router.push("/settings")}
-          hitSlop={12}
-          style={styles.settingsButton}
-        >
-          <Text style={styles.settingsIcon}>⚙</Text>
+        <Text style={styles.headerLabel}>Hoy</Text>
+        <Pressable onPress={() => router.push("/settings")} hitSlop={12}>
+          <Text style={styles.settingsIcon}>⋯</Text>
         </Pressable>
       </View>
 
@@ -233,64 +227,130 @@ export default function Index() {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
-            tintColor={colors.primary}
+            tintColor={colors.accent}
           />
         }
+        showsVerticalScrollIndicator={false}
       >
-        {apps.length > 0 && (
-          <View style={styles.summaryCard}>
-            <Text style={styles.summaryLabel}>Tiempo total usado hoy</Text>
-            <Text style={styles.summaryValue}>{formatDuration(totalUsed)}</Text>
-            <View style={styles.progressTrack}>
-              <View
-                style={[
-                  styles.progressFill,
-                  {
-                    width: `${totalPercent}%`,
-                    backgroundColor: progressColor(totalPercent),
-                  },
-                ]}
+        {/* Metrica hero */}
+        <View style={styles.hero}>
+          {hasHistory ? (
+            <>
+              <CountUpText
+                targetValue={recoveredMinutes}
+                formatter={formatDuration}
+                style={[typography.metricHero, styles.heroNumber]}
               />
+              <Text style={styles.heroLabel}>de tiempo recuperado hoy</Text>
+            </>
+          ) : (
+            <>
+              <CountUpText
+                targetValue={totalToday}
+                formatter={formatDuration}
+                style={[typography.metricHero, styles.heroNumber]}
+              />
+              <Text style={styles.heroLabel}>
+                usados hoy · en unos días vas a ver tu comparación
+              </Text>
+            </>
+          )}
+        </View>
+
+        {/* Antes / Ahora */}
+        {hasHistory && (
+          <View style={styles.compareRow}>
+            <View style={styles.compareCol}>
+              <Text style={styles.compareLabel}>PROMEDIO</Text>
+              <Text style={[typography.metricMedium, styles.compareValueMuted]}>
+                {formatDuration(weeklyAverage)}
+              </Text>
+              <View style={styles.compareBarTrack}>
+                <View
+                  style={[
+                    styles.compareBarFill,
+                    { width: "100%", backgroundColor: colors.textTertiary },
+                  ]}
+                />
+              </View>
+            </View>
+            <View style={styles.compareCol}>
+              <Text style={styles.compareLabel}>HOY</Text>
+              <Text
+                style={[typography.metricMedium, { color: colors.textPrimary }]}
+              >
+                {formatDuration(totalToday)}
+              </Text>
+              <View style={styles.compareBarTrack}>
+                <View
+                  style={[
+                    styles.compareBarFill,
+                    {
+                      width: `${weeklyAverage > 0 ? Math.min(100, (totalToday / weeklyAverage) * 100) : 0}%`,
+                      backgroundColor: colors.accent,
+                    },
+                  ]}
+                />
+              </View>
             </View>
           </View>
         )}
 
+        {/* Tu dia */}
+        {totalLimit > 0 && (
+          <View style={styles.dayProgressBlock}>
+            <View style={styles.dayProgressHeader}>
+              <Text style={styles.sectionLabel}>Tu día</Text>
+              <Text style={styles.dayProgressPercent}>
+                {Math.round(todayPercent)}%
+              </Text>
+            </View>
+            <ProgressBar
+              percent={todayPercent}
+              color={stateColor(todayPercent)}
+            />
+            {percentileBetter !== null && (
+              <Text style={styles.percentileText}>
+                Vas mejor que el {percentileBetter}% de tus últimos días.
+              </Text>
+            )}
+          </View>
+        )}
+
+        {/* Apps */}
+        <Text style={[styles.sectionLabel, styles.appsSectionLabel]}>Apps</Text>
         {apps.map((app) => {
           const percent = Math.min(
             100,
             (app.minutesUsedToday / app.dailyLimitMinutes) * 100,
           );
-          const barColor = progressColor(percent);
+          const remaining = Math.max(
+            0,
+            app.dailyLimitMinutes - app.minutesUsedToday,
+          );
+          const color = stateColor(percent);
+
           return (
-            <View
-              key={app.id}
-              style={[styles.card, app.isBlocked && styles.cardBlocked]}
-            >
-              <View style={styles.cardTopRow}>
-                <Text style={styles.appName}>{app.displayName}</Text>
-                {app.isBlocked && (
-                  <Text style={styles.blockedTag}>Bloqueada</Text>
-                )}
+            <View key={app.id} style={styles.appRow}>
+              <View style={styles.appRowTop}>
+                <View style={styles.appRowLeft}>
+                  <Text style={styles.appEmoji}>{emojiForApp(app.id)}</Text>
+                  <Text style={styles.appName}>{app.displayName}</Text>
+                </View>
+                <Text style={[styles.appStatus, { color }]}>
+                  {app.isBlocked
+                    ? "Bloqueada"
+                    : `Quedan ${formatDuration(remaining)}`}
+                </Text>
               </View>
-              <Text style={styles.limit}>
-                {formatDuration(app.minutesUsedToday)} /{" "}
-                {formatDuration(app.dailyLimitMinutes)}
-              </Text>
-              <View style={styles.progressTrackSmall}>
-                <View
-                  style={[
-                    styles.progressFillSmall,
-                    { width: `${percent}%`, backgroundColor: barColor },
-                  ]}
-                />
-              </View>
+              <ProgressBar percent={percent} color={color} height={6} />
             </View>
           );
         })}
 
         {apps.length === 0 && (
           <Text style={styles.empty}>
-            No tenés apps controladas. Agregá una desde Ajustes.
+            No tenés apps controladas. Agregá una desde el menú.
           </Text>
         )}
       </ScrollView>
@@ -302,95 +362,76 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   header: {
     flexDirection: "row",
-    alignItems: "flex-start",
+    alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: spacing.lg,
     paddingTop: 60,
     paddingBottom: spacing.sm,
   },
-  greeting: { fontSize: 30, fontWeight: "700", color: colors.textPrimary },
-  date: {
-    fontSize: 14,
+  headerLabel: { ...typography.subtitle, color: colors.textSecondary },
+  settingsIcon: {
+    fontSize: 22,
     color: colors.textSecondary,
-    marginTop: 2,
-    textTransform: "capitalize",
+    fontWeight: "700",
   },
-  settingsButton: {
-    width: 40,
-    height: 40,
-    borderRadius: radius.pill,
-    backgroundColor: colors.surface,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1,
-    borderColor: colors.border,
-    marginTop: 2,
-  },
-  settingsIcon: { fontSize: 18, color: colors.textSecondary },
-  scrollContent: { padding: spacing.lg, paddingTop: spacing.md },
+  scrollContent: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl },
 
-  summaryCard: {
-    backgroundColor: colors.surfaceElevated,
-    borderRadius: radius.lg,
-    padding: spacing.lg,
+  hero: {
+    alignItems: "flex-start",
+    marginTop: spacing.md,
     marginBottom: spacing.xl,
-    borderWidth: 1,
-    borderColor: colors.border,
   },
-  summaryLabel: { fontSize: 13, color: colors.textSecondary, marginBottom: 6 },
-  summaryValue: {
-    fontSize: 34,
-    fontWeight: "800",
-    color: colors.textPrimary,
-    marginBottom: spacing.md,
-  },
+  heroNumber: { color: colors.textPrimary },
+  heroLabel: { ...typography.body, color: colors.textSecondary, marginTop: 2 },
 
-  progressTrack: {
-    height: 8,
-    backgroundColor: colors.background,
+  compareRow: {
+    flexDirection: "row",
+    gap: spacing.lg,
+    marginBottom: spacing.xl,
+  },
+  compareCol: { flex: 1 },
+  compareLabel: {
+    ...typography.label,
+    color: colors.textTertiary,
+    marginBottom: 4,
+  },
+  compareValueMuted: { color: colors.textSecondary },
+  compareBarTrack: {
+    height: 4,
+    backgroundColor: colors.surfaceElevated,
     borderRadius: radius.pill,
+    marginTop: spacing.sm,
     overflow: "hidden",
   },
-  progressFill: { height: "100%", borderRadius: radius.pill },
+  compareBarFill: { height: "100%", borderRadius: radius.pill },
 
-  card: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.lg,
-    padding: spacing.lg,
-    marginBottom: spacing.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  cardBlocked: { borderColor: colors.danger },
-  cardTopRow: {
+  dayProgressBlock: { marginBottom: spacing.xl },
+  dayProgressHeader: {
     flexDirection: "row",
-    alignItems: "center",
     justifyContent: "space-between",
-  },
-  appName: { fontSize: 18, fontWeight: "600", color: colors.textPrimary },
-  blockedTag: {
-    fontSize: 11,
-    color: colors.danger,
-    fontWeight: "700",
-    borderWidth: 1,
-    borderColor: colors.danger,
-    borderRadius: radius.sm,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-  },
-  limit: {
-    fontSize: 14,
-    color: colors.textSecondary,
-    marginTop: 6,
+    alignItems: "baseline",
     marginBottom: spacing.sm,
   },
-  progressTrackSmall: {
-    height: 6,
-    backgroundColor: colors.background,
-    borderRadius: radius.pill,
-    overflow: "hidden",
+  sectionLabel: { ...typography.label, color: colors.textTertiary },
+  dayProgressPercent: { ...typography.bodyStrong, color: colors.textPrimary },
+  percentileText: {
+    ...typography.caption,
+    color: colors.textSecondary,
+    marginTop: spacing.sm,
   },
-  progressFillSmall: { height: "100%", borderRadius: radius.pill },
+
+  appsSectionLabel: { marginBottom: spacing.md },
+  appRow: { marginBottom: spacing.lg },
+  appRowTop: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: spacing.sm,
+  },
+  appRowLeft: { flexDirection: "row", alignItems: "center", gap: 10 },
+  appEmoji: { fontSize: 18 },
+  appName: { ...typography.bodyStrong, color: colors.textPrimary },
+  appStatus: { ...typography.caption },
 
   empty: {
     color: colors.textSecondary,
@@ -400,19 +441,18 @@ const styles = StyleSheet.create({
   },
   permissionBox: { flex: 1, justifyContent: "center", padding: spacing.lg },
   permissionTitle: {
-    fontSize: 22,
-    fontWeight: "700",
+    ...typography.title,
     color: colors.textPrimary,
     marginBottom: spacing.sm,
   },
   permissionText: {
-    fontSize: 15,
+    ...typography.body,
     color: colors.textSecondary,
     marginBottom: spacing.lg,
     lineHeight: 22,
   },
   button: {
-    backgroundColor: colors.primary,
+    backgroundColor: colors.accent,
     borderRadius: radius.md,
     padding: 16,
     alignItems: "center",
