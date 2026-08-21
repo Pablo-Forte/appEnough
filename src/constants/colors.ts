@@ -1,20 +1,23 @@
 // src/constants/colors.ts
+//
+// Paleta "Enough" v2: índigo profundo + esmeralda, a tono con el ícono.
 
 export const colors = {
-  background: "#04121C",
-  surface: "#0D2333",
-  surfaceElevated: "#123047",
-  border: "#1C3F52",
+  background: "#0B1220",
+  surface: "#121B2E",
+  surfaceElevated: "#1A2740",
+  border: "#243350",
 
-  primary: "#2FB8C6",
-  primaryDark: "#1C6E8C",
+  primary: "#1FD1B0",
+  primaryDark: "#0E9A82",
 
-  textPrimary: "#F2FAFB",
-  textSecondary: "#82A6B3",
-  textTertiary: "#4E6B78",
+  textPrimary: "#F5FDFB",
+  textSecondary: "#8DA0B8",
+  textTertiary: "#516079",
 
-  danger: "#E76F51",
-  success: "#4CB963",
+  danger: "#F2705C",
+  warning: "#F2B84C",
+  success: "#1FD1B0",
 };
 
 export const radius = {

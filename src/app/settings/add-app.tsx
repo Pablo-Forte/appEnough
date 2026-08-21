@@ -3,20 +3,18 @@
 import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useState } from "react";
 import {
-    Pressable,
-    SafeAreaView,
-    ScrollView,
-    StyleSheet,
-    Text,
-    View,
+  Pressable,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
 } from "react-native";
 import { AVAILABLE_APPS } from "../../constants/apps";
 import { colors, radius, spacing } from "../../constants/colors";
-import { getTrackedApps, saveTrackedApp } from "../../database/db";
+import { getTrackedApps } from "../../database/db";
 
 const USER_ID = "demo-user";
-const DEFAULT_MINUTES = 20;
-const DEFAULT_BLOCK_MINUTES = 120;
 
 export default function AddAppScreen() {
   const router = useRouter();
@@ -29,25 +27,17 @@ export default function AddAppScreen() {
     }, []),
   );
 
-  function handleAdd(appId: string) {
+  function handleSelect(appId: string) {
     const app = AVAILABLE_APPS.find((a) => a.id === appId);
     if (!app) return;
-    const now = new Date().toISOString();
-    saveTrackedApp({
-      id: app.id,
-      userId: USER_ID,
-      appIdentifier: app.appIdentifier,
-      displayName: app.displayName,
-      platform: "android",
-      dailyLimitMinutes: DEFAULT_MINUTES,
-      blockDurationMinutes: DEFAULT_BLOCK_MINUTES,
-      warningMinutesBefore: 5,
-      allowExceptions: false,
-      isActive: true,
-      createdAt: now,
-      updatedAt: now,
+    router.push({
+      pathname: "/settings/set-limit",
+      params: {
+        appId: app.id,
+        displayName: app.displayName,
+        appIdentifier: app.appIdentifier,
+      },
     });
-    router.back();
   }
 
   const availableToAdd = AVAILABLE_APPS.filter((a) => !trackedIds.has(a.id));
@@ -71,7 +61,7 @@ export default function AddAppScreen() {
           <Pressable
             key={app.id}
             style={styles.card}
-            onPress={() => handleAdd(app.id)}
+            onPress={() => handleSelect(app.id)}
           >
             <Text style={styles.appName}>{app.displayName}</Text>
             <Text style={styles.plus}>+</Text>

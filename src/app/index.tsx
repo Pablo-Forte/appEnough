@@ -23,13 +23,49 @@ import {
   upsertUsageSession,
 } from "../database/db";
 import { TrackedApp } from "../models/types";
+import { formatDuration } from "../utils/format";
 
 const USER_ID = "demo-user";
 const TODAY = new Date().toISOString().split("T")[0];
 
+const WEEKDAYS = [
+  "domingo",
+  "lunes",
+  "martes",
+  "miércoles",
+  "jueves",
+  "viernes",
+  "sábado",
+];
+const MONTHS = [
+  "enero",
+  "febrero",
+  "marzo",
+  "abril",
+  "mayo",
+  "junio",
+  "julio",
+  "agosto",
+  "septiembre",
+  "octubre",
+  "noviembre",
+  "diciembre",
+];
+
 interface AppWithUsage extends TrackedApp {
   minutesUsedToday: number;
   isBlocked: boolean;
+}
+
+function formatToday(): string {
+  const now = new Date();
+  return `${WEEKDAYS[now.getDay()]} ${now.getDate()} de ${MONTHS[now.getMonth()]}`;
+}
+
+function progressColor(percent: number): string {
+  if (percent >= 100) return colors.danger;
+  if (percent >= 80) return colors.warning;
+  return colors.primary;
 }
 
 export default function Index() {
@@ -102,7 +138,6 @@ export default function Index() {
     loadData();
   }, [loadData, router]);
 
-  // Refresca cada vez que se vuelve a esta pantalla (ej. al salir de Ajustes)
   useFocusEffect(
     useCallback(() => {
       if (ready) loadData();
@@ -171,10 +206,18 @@ export default function Index() {
     );
   }
 
+  const totalUsed = apps.reduce((sum, a) => sum + a.minutesUsedToday, 0);
+  const totalLimit = apps.reduce((sum, a) => sum + a.dailyLimitMinutes, 0);
+  const totalPercent =
+    totalLimit > 0 ? Math.min(100, (totalUsed / totalLimit) * 100) : 0;
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>Hoy</Text>
+        <View>
+          <Text style={styles.greeting}>Hoy</Text>
+          <Text style={styles.date}>{formatToday()}</Text>
+        </View>
         <Pressable
           onPress={() => router.push("/settings")}
           hitSlop={12}
@@ -194,18 +237,56 @@ export default function Index() {
           />
         }
       >
-        {apps.map((app) => (
-          <View
-            key={app.id}
-            style={[styles.card, app.isBlocked && styles.cardBlocked]}
-          >
-            <Text style={styles.appName}>{app.displayName}</Text>
-            <Text style={styles.limit}>
-              {Math.round(app.minutesUsedToday)} / {app.dailyLimitMinutes} min
-            </Text>
-            {app.isBlocked && <Text style={styles.blockedTag}>Bloqueada</Text>}
+        {apps.length > 0 && (
+          <View style={styles.summaryCard}>
+            <Text style={styles.summaryLabel}>Tiempo total usado hoy</Text>
+            <Text style={styles.summaryValue}>{formatDuration(totalUsed)}</Text>
+            <View style={styles.progressTrack}>
+              <View
+                style={[
+                  styles.progressFill,
+                  {
+                    width: `${totalPercent}%`,
+                    backgroundColor: progressColor(totalPercent),
+                  },
+                ]}
+              />
+            </View>
           </View>
-        ))}
+        )}
+
+        {apps.map((app) => {
+          const percent = Math.min(
+            100,
+            (app.minutesUsedToday / app.dailyLimitMinutes) * 100,
+          );
+          const barColor = progressColor(percent);
+          return (
+            <View
+              key={app.id}
+              style={[styles.card, app.isBlocked && styles.cardBlocked]}
+            >
+              <View style={styles.cardTopRow}>
+                <Text style={styles.appName}>{app.displayName}</Text>
+                {app.isBlocked && (
+                  <Text style={styles.blockedTag}>Bloqueada</Text>
+                )}
+              </View>
+              <Text style={styles.limit}>
+                {formatDuration(app.minutesUsedToday)} /{" "}
+                {formatDuration(app.dailyLimitMinutes)}
+              </Text>
+              <View style={styles.progressTrackSmall}>
+                <View
+                  style={[
+                    styles.progressFillSmall,
+                    { width: `${percent}%`, backgroundColor: barColor },
+                  ]}
+                />
+              </View>
+            </View>
+          );
+        })}
 
         {apps.length === 0 && (
           <Text style={styles.empty}>
@@ -221,13 +302,19 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   header: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
     justifyContent: "space-between",
     paddingHorizontal: spacing.lg,
     paddingTop: 60,
     paddingBottom: spacing.sm,
   },
-  title: { fontSize: 28, fontWeight: "700", color: colors.textPrimary },
+  greeting: { fontSize: 30, fontWeight: "700", color: colors.textPrimary },
+  date: {
+    fontSize: 14,
+    color: colors.textSecondary,
+    marginTop: 2,
+    textTransform: "capitalize",
+  },
   settingsButton: {
     width: 40,
     height: 40,
@@ -237,26 +324,74 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     borderWidth: 1,
     borderColor: colors.border,
+    marginTop: 2,
   },
   settingsIcon: { fontSize: 18, color: colors.textSecondary },
   scrollContent: { padding: spacing.lg, paddingTop: spacing.md },
+
+  summaryCard: {
+    backgroundColor: colors.surfaceElevated,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    marginBottom: spacing.xl,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  summaryLabel: { fontSize: 13, color: colors.textSecondary, marginBottom: 6 },
+  summaryValue: {
+    fontSize: 34,
+    fontWeight: "800",
+    color: colors.textPrimary,
+    marginBottom: spacing.md,
+  },
+
+  progressTrack: {
+    height: 8,
+    backgroundColor: colors.background,
+    borderRadius: radius.pill,
+    overflow: "hidden",
+  },
+  progressFill: { height: "100%", borderRadius: radius.pill },
+
   card: {
     backgroundColor: colors.surface,
     borderRadius: radius.lg,
     padding: spacing.lg,
-    marginBottom: spacing.lg, // mas espacio entre tarjetas
+    marginBottom: spacing.lg,
     borderWidth: 1,
     borderColor: colors.border,
   },
   cardBlocked: { borderColor: colors.danger },
-  appName: { fontSize: 18, fontWeight: "600", color: colors.textPrimary },
-  limit: { fontSize: 14, color: colors.textSecondary, marginTop: 6 },
-  blockedTag: {
-    fontSize: 12,
-    color: colors.danger,
-    marginTop: 10,
-    fontWeight: "700",
+  cardTopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
   },
+  appName: { fontSize: 18, fontWeight: "600", color: colors.textPrimary },
+  blockedTag: {
+    fontSize: 11,
+    color: colors.danger,
+    fontWeight: "700",
+    borderWidth: 1,
+    borderColor: colors.danger,
+    borderRadius: radius.sm,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  limit: {
+    fontSize: 14,
+    color: colors.textSecondary,
+    marginTop: 6,
+    marginBottom: spacing.sm,
+  },
+  progressTrackSmall: {
+    height: 6,
+    backgroundColor: colors.background,
+    borderRadius: radius.pill,
+    overflow: "hidden",
+  },
+  progressFillSmall: { height: "100%", borderRadius: radius.pill },
+
   empty: {
     color: colors.textSecondary,
     fontSize: 14,
