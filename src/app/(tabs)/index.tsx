@@ -1,42 +1,36 @@
-// src/app/index.tsx
+// src/app/(tabs)/index.tsx
 
 import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import {
-  Pressable,
-  RefreshControl,
-  SafeAreaView,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
+    Pressable,
+    RefreshControl,
+    SafeAreaView,
+    ScrollView,
+    StyleSheet,
+    Text,
+    View,
 } from "react-native";
-import AppBlockerModule from "../../modules/app-blocker/src/AppBlockerModule";
-import UsageStatsModule from "../../modules/usage-stats/src/UsageStatsModule";
-import CountUpText from "../components/ui/CountUpText";
-import ProgressBar from "../components/ui/ProgressBar";
-import { REMOVAL_DELAY_HOURS, emojiForApp } from "../constants/apps";
-import { colors, radius, spacing } from "../constants/colors";
-import { typography } from "../constants/typography";
+import AppBlockerModule from "../../../modules/app-blocker/src/AppBlockerModule";
+import UsageStatsModule from "../../../modules/usage-stats/src/UsageStatsModule";
+import CountUpText from "../../components/ui/CountUpText";
+import ProgressBar from "../../components/ui/ProgressBar";
+import { REMOVAL_DELAY_HOURS } from "../../constants/apps";
+import { colors, radius, spacing } from "../../constants/colors";
+import { typography } from "../../constants/typography";
 import {
-  getRecentDailyTotals,
-  getTrackedApps,
-  getUser,
-  initDatabase,
-  processPendingRemovals,
-  upsertUsageSession,
-} from "../database/db";
-import { TrackedApp } from "../models/types";
-import { formatDuration } from "../utils/format";
+    getRecentDailyTotals,
+    getTrackedApps,
+    getUser,
+    initDatabase,
+    processPendingRemovals,
+    upsertUsageSession,
+} from "../../database/db";
+import { formatDuration } from "../../utils/format";
 
 const USER_ID = "demo-user";
 const TODAY = new Date().toISOString().split("T")[0];
-const HISTORY_DAYS = 8; // hoy + 7 dias anteriores
-
-interface AppWithUsage extends TrackedApp {
-  minutesUsedToday: number;
-  isBlocked: boolean;
-}
+const HISTORY_DAYS = 8;
 
 function stateColor(percent: number): string {
   if (percent >= 100) return colors.danger;
@@ -44,10 +38,11 @@ function stateColor(percent: number): string {
   return colors.accent;
 }
 
-export default function Index() {
+export default function InicioTab() {
   const router = useRouter();
   const [ready, setReady] = useState(false);
-  const [apps, setApps] = useState<AppWithUsage[]>([]);
+  const [totalToday, setTotalToday] = useState(0);
+  const [totalLimit, setTotalLimit] = useState(0);
   const [history, setHistory] = useState<
     { date: string; totalMinutes: number }[]
   >([]);
@@ -67,21 +62,24 @@ export default function Index() {
     setHasUsagePermission(usageGranted);
     setHasAccessibilityPermission(accessibilityGranted);
 
-    if (!usageGranted) {
-      setApps([]);
-      return;
-    }
+    if (!usageGranted) return;
 
     const realUsage = UsageStatsModule.getTodayUsageStats();
     const usageByPackage = new Map(
       realUsage.map((u) => [u.packageName, u.minutesUsed]),
     );
-
     const trackedApps = getTrackedApps(USER_ID);
 
-    const appsWithUsage: AppWithUsage[] = trackedApps.map((app) => {
+    let sumUsed = 0;
+    let sumLimit = 0;
+    const blockedPackages: string[] = [];
+
+    trackedApps.forEach((app) => {
       const minutesUsedToday = usageByPackage.get(app.appIdentifier) ?? 0;
       const isBlocked = minutesUsedToday >= app.dailyLimitMinutes;
+      sumUsed += minutesUsedToday;
+      sumLimit += app.dailyLimitMinutes;
+      if (isBlocked) blockedPackages.push(app.appIdentifier);
 
       upsertUsageSession({
         id: `session-${app.id}-${TODAY}`,
@@ -92,17 +90,13 @@ export default function Index() {
         blockedAttempts: 0,
         limitReached: isBlocked,
       });
-
-      return { ...app, minutesUsedToday, isBlocked };
     });
 
-    setApps(appsWithUsage);
+    setTotalToday(sumUsed);
+    setTotalLimit(sumLimit);
     setHistory(getRecentDailyTotals(USER_ID, HISTORY_DAYS));
 
     if (accessibilityGranted) {
-      const blockedPackages = appsWithUsage
-        .filter((a) => a.isBlocked)
-        .map((a) => a.appIdentifier);
       AppBlockerModule.setBlockedPackages(blockedPackages);
     }
   }, []);
@@ -186,25 +180,17 @@ export default function Index() {
     );
   }
 
-  // --- Calculos con datos 100% reales ---
-  const totalToday = apps.reduce((sum, a) => sum + a.minutesUsedToday, 0);
-  const totalLimit = apps.reduce((sum, a) => sum + a.dailyLimitMinutes, 0);
   const todayPercent =
     totalLimit > 0 ? Math.min(100, (totalToday / totalLimit) * 100) : 0;
-
-  // Dias anteriores reales (excluye hoy), para promedio y percentil
   const previousDays = history.filter((h) => h.date !== TODAY);
   const hasHistory = previousDays.length >= 2;
-
   const weeklyAverage = hasHistory
     ? previousDays.reduce((sum, d) => sum + d.totalMinutes, 0) /
       previousDays.length
     : 0;
-
   const recoveredMinutes = hasHistory
     ? Math.max(0, weeklyAverage - totalToday)
     : 0;
-
   const daysWithMoreUsage = previousDays.filter(
     (d) => d.totalMinutes > totalToday,
   ).length;
@@ -216,9 +202,6 @@ export default function Index() {
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.headerLabel}>Hoy</Text>
-        <Pressable onPress={() => router.push("/settings")} hitSlop={12}>
-          <Text style={styles.settingsIcon}>⋯</Text>
-        </Pressable>
       </View>
 
       <ScrollView
@@ -232,7 +215,6 @@ export default function Index() {
         }
         showsVerticalScrollIndicator={false}
       >
-        {/* Metrica hero */}
         <View style={styles.hero}>
           {hasHistory ? (
             <>
@@ -257,7 +239,6 @@ export default function Index() {
           )}
         </View>
 
-        {/* Antes / Ahora */}
         {hasHistory && (
           <View style={styles.compareRow}>
             <View style={styles.compareCol}>
@@ -296,7 +277,6 @@ export default function Index() {
           </View>
         )}
 
-        {/* Tu dia */}
         {totalLimit > 0 && (
           <View style={styles.dayProgressBlock}>
             <View style={styles.dayProgressHeader}>
@@ -317,40 +297,10 @@ export default function Index() {
           </View>
         )}
 
-        {/* Apps */}
-        <Text style={[styles.sectionLabel, styles.appsSectionLabel]}>Apps</Text>
-        {apps.map((app) => {
-          const percent = Math.min(
-            100,
-            (app.minutesUsedToday / app.dailyLimitMinutes) * 100,
-          );
-          const remaining = Math.max(
-            0,
-            app.dailyLimitMinutes - app.minutesUsedToday,
-          );
-          const color = stateColor(percent);
-
-          return (
-            <View key={app.id} style={styles.appRow}>
-              <View style={styles.appRowTop}>
-                <View style={styles.appRowLeft}>
-                  <Text style={styles.appEmoji}>{emojiForApp(app.id)}</Text>
-                  <Text style={styles.appName}>{app.displayName}</Text>
-                </View>
-                <Text style={[styles.appStatus, { color }]}>
-                  {app.isBlocked
-                    ? "Bloqueada"
-                    : `Quedan ${formatDuration(remaining)}`}
-                </Text>
-              </View>
-              <ProgressBar percent={percent} color={color} height={6} />
-            </View>
-          );
-        })}
-
-        {apps.length === 0 && (
+        {totalLimit === 0 && (
           <Text style={styles.empty}>
-            No tenés apps controladas. Agregá una desde el menú.
+            No tenés apps controladas todavía. Andá a la pestaña Apps para
+            agregar una.
           </Text>
         )}
       </ScrollView>
@@ -361,19 +311,11 @@ export default function Index() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   header: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
     paddingHorizontal: spacing.lg,
     paddingTop: 60,
     paddingBottom: spacing.sm,
   },
   headerLabel: { ...typography.subtitle, color: colors.textSecondary },
-  settingsIcon: {
-    fontSize: 22,
-    color: colors.textSecondary,
-    fontWeight: "700",
-  },
   scrollContent: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl },
 
   hero: {
@@ -419,19 +361,6 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     marginTop: spacing.sm,
   },
-
-  appsSectionLabel: { marginBottom: spacing.md },
-  appRow: { marginBottom: spacing.lg },
-  appRowTop: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: spacing.sm,
-  },
-  appRowLeft: { flexDirection: "row", alignItems: "center", gap: 10 },
-  appEmoji: { fontSize: 18 },
-  appName: { ...typography.bodyStrong, color: colors.textPrimary },
-  appStatus: { ...typography.caption },
 
   empty: {
     color: colors.textSecondary,
